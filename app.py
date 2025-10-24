@@ -37,7 +37,7 @@ def safe_float(text):
 def get_html(url):
     """Get HTML using ScraperAPI fallback for JS-heavy pages."""
     try:
-        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={url}"
+        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&render=true&url={url}"
         res = requests.get(proxy_url, headers=HEADERS, timeout=20)
         res.raise_for_status()
         return res.text
