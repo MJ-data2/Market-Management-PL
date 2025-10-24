@@ -69,14 +69,23 @@ def get_html(url, retries=3):
 # ----------------------------
 def scrape_ceneo(ean):
     url = f"https://www.ceneo.pl/;szukaj-{ean}"
-    soup = BeautifulSoup(get_html(url), "html.parser")
-    prices = []
-    for el in soup.select(".price, .price-value"):
+    html = get_html(url)
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+
+    product_cards = soup.select("div.cat-prod-row")
+    for card in product_cards:
         try:
-            prices.append(safe_float(el.get_text(strip=True)))
-        except:
+            price_el = card.select_one(".price, .price-value")
+            seller_el = card.select_one(".shop-name, .product-offer-link")
+            if price_el:
+                price = safe_float(price_el.get_text(strip=True))
+                seller = seller_el.get_text(strip=True) if seller_el else "Unknown seller"
+                results.append({"seller": seller, "price": price})
+        except Exception:
             continue
-    return prices
+    return results
+
 
 def scrape_allegro(ean):
     url = f"https://allegro.pl/listing?string={ean}"
