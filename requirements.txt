@@ -3,4 +3,5 @@ beautifulsoup4
 requests
 openai
 numpy
+plotly
 
