@@ -3,8 +3,4 @@ beautifulsoup4
 requests
 openai
 numpy
-streamlit
-beautifulsoup4
-requests
-openai
-numpy
+
