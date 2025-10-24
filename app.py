@@ -4,35 +4,53 @@ from bs4 import BeautifulSoup
 import numpy as np
 import openai
 import time
+import random
 
 # ----------------------------
 # STREAMLIT CONFIG
 # ----------------------------
-st.set_page_config(page_title="Barcode Price Intelligence", layout="centered")
-st.title("📦 Barcode-based Multi-Market Price Intelligence")
-st.caption("Enter a product barcode (EAN/GTIN) to find prices on Ceneo, Allegro, Amazon, and Google Shopping.")
+st.set_page_config(page_title="Universal Price Intelligence", layout="centered")
+st.title("🌍 Universal Multi-Market Price Intelligence Dashboard")
+st.caption("Searches Ceneo, Allegro, Amazon, and Google Shopping by barcode (EAN) using ScraperAPI fallback.")
 
 # ----------------------------
-# OPENAI CONFIG
+# API KEYS
 # ----------------------------
 openai.api_key = st.secrets["OPENAI_API_KEY"]
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+SCRAPER_API_KEY = st.secrets["SCRAPER_API_KEY"]
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:119.0) Gecko/20100101 Firefox/119.0",
+    "Accept-Language": "pl,en-US;q=0.9,en;q=0.8",
+    "Referer": "https://www.google.com/",
+    "DNT": "1",
+    "Connection": "keep-alive",
+}
 
 # ----------------------------
 # SCRAPER HELPERS
 # ----------------------------
 def safe_float(text):
-    """Convert PLN string price to float safely."""
     text = text.replace("zł", "").replace(",", ".").replace(" ", "")
     return float(text)
 
+def get_html(url):
+    """Get HTML using ScraperAPI fallback for JS-heavy pages."""
+    try:
+        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={url}"
+        res = requests.get(proxy_url, headers=HEADERS, timeout=20)
+        res.raise_for_status()
+        return res.text
+    except Exception as e:
+        st.warning(f"ScraperAPI failed for {url[:50]}... ({e})")
+        return ""
+
 # ----------------------------
-# MARKETPLACE SCRAPERS
+# MARKETPLACE SCRAPERS (via ScraperAPI)
 # ----------------------------
 def scrape_ceneo(ean):
     url = f"https://www.ceneo.pl/;szukaj-{ean}"
-    html = requests.get(url, headers=HEADERS, timeout=10).text
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(get_html(url), "html.parser")
     prices = []
     for el in soup.select(".price"):
         try:
@@ -43,8 +61,7 @@ def scrape_ceneo(ean):
 
 def scrape_allegro(ean):
     url = f"https://allegro.pl/listing?string={ean}"
-    html = requests.get(url, headers=HEADERS, timeout=10).text
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(get_html(url), "html.parser")
     prices = []
     for el in soup.select("span._9c44d_1zemI span"):
         try:
@@ -55,8 +72,7 @@ def scrape_allegro(ean):
 
 def scrape_amazon(ean):
     url = f"https://www.amazon.pl/s?k={ean}"
-    html = requests.get(url, headers=HEADERS, timeout=10).text
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(get_html(url), "html.parser")
     prices = []
     for el in soup.select("span.a-price-whole"):
         try:
@@ -67,8 +83,7 @@ def scrape_amazon(ean):
 
 def scrape_google_shopping(ean):
     url = f"https://www.google.com/search?tbm=shop&q={ean}"
-    html = requests.get(url, headers=HEADERS, timeout=10).text
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(get_html(url), "html.parser")
     prices = []
     for el in soup.select("span.a8Pemb"):
         try:
@@ -81,7 +96,7 @@ def scrape_google_shopping(ean):
 # AGGREGATOR
 # ----------------------------
 def aggregate_prices(ean):
-    """Collect prices from all supported sites."""
+    """Collect prices from all supported sites using ScraperAPI."""
     results = {}
     for site, fn in {
         "Ceneo": scrape_ceneo,
@@ -93,7 +108,7 @@ def aggregate_prices(ean):
             st.write(f"🔍 Searching **{site}** ...")
             prices = fn(ean)
             results[site] = prices
-            time.sleep(1)
+            time.sleep(random.uniform(1, 2))
         except Exception as e:
             st.warning(f"{site} error: {e}")
             results[site] = []
@@ -107,14 +122,14 @@ def gpt_summary(ean, median, deviation, site_counts):
     prompt = f"""
 Product EAN: {ean}
 Median Market Price: {median:.2f} zł
-Deviation: {deviation:.1f}%
-Listings found per site: {site_counts}
+Deviation vs RRP: {deviation:.1f}%
+Listings per site: {site_counts}
 
-Summarize this pricing situation briefly in a professional business tone.
+Provide a short professional summary comparing market prices to RRP.
     """
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-5",  # or "gpt-4-turbo"
+            model="gpt-5",
             messages=[{"role": "user", "content": prompt}],
         )
         return response["choices"][0]["message"]["content"]
@@ -152,5 +167,6 @@ if st.button("Check Market Prices", key="search_btn"):
             st.write(summary)
     else:
         st.warning("No prices found for this barcode.")
+
 
 
