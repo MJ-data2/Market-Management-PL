@@ -48,49 +48,66 @@ def get_html(url):
 # ----------------------------
 # MARKETPLACE SCRAPERS (via ScraperAPI)
 # ----------------------------
+# --- CENEO ---
 def scrape_ceneo(ean):
     url = f"https://www.ceneo.pl/;szukaj-{ean}"
     soup = BeautifulSoup(get_html(url), "html.parser")
     prices = []
-    for el in soup.select(".price"):
+    for el in soup.select(".price, .price-value"):
         try:
             prices.append(safe_float(el.get_text(strip=True)))
         except:
             continue
     return prices
 
+
+# --- ALLEGRO ---
 def scrape_allegro(ean):
     url = f"https://allegro.pl/listing?string={ean}"
     soup = BeautifulSoup(get_html(url), "html.parser")
     prices = []
-    for el in soup.select("span._9c44d_1zemI span"):
-        try:
-            prices.append(safe_float(el.get_text(strip=True)))
-        except:
-            continue
+    # Allegro uses many nested spans; catch all numeric prices
+    for el in soup.select("span._9c44d_1zemI span, span[data-testid='price-section']"):
+        txt = el.get_text(strip=True)
+        if "zł" in txt:
+            try:
+                prices.append(safe_float(txt))
+            except:
+                continue
     return prices
 
+
+# --- AMAZON ---
 def scrape_amazon(ean):
     url = f"https://www.amazon.pl/s?k={ean}"
     soup = BeautifulSoup(get_html(url), "html.parser")
     prices = []
-    for el in soup.select("span.a-price-whole"):
-        try:
-            prices.append(safe_float(el.get_text(strip=True)))
-        except:
-            continue
+    for el in soup.select("span.a-price-whole, span.a-price span.a-offscreen"):
+        txt = el.get_text(strip=True)
+        if "zł" in txt:
+            try:
+                prices.append(safe_float(txt))
+            except:
+                continue
     return prices
 
+
+# --- GOOGLE SHOPPING ---
 def scrape_google_shopping(ean):
     url = f"https://www.google.com/search?tbm=shop&q={ean}"
-    soup = BeautifulSoup(get_html(url), "html.parser")
+    html = get_html(url)
+    soup = BeautifulSoup(html, "html.parser")
     prices = []
-    for el in soup.select("span.a8Pemb"):
-        try:
-            prices.append(safe_float(el.get_text(strip=True)))
-        except:
-            continue
+    # Main price spans
+    for el in soup.select("span.a8Pemb, span.T14wmb, div.t0fcAb"):
+        txt = el.get_text(strip=True)
+        if "zł" in txt:
+            try:
+                prices.append(safe_float(txt))
+            except:
+                continue
     return prices
+
 
 # ----------------------------
 # AGGREGATOR
