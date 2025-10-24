@@ -118,6 +118,9 @@ def aggregate_prices(ean):
 # ----------------------------
 # GPT SUMMARY
 # ----------------------------
+from openai import OpenAI
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 def gpt_summary(ean, median, deviation, site_counts):
     prompt = f"""
 Product EAN: {ean}
@@ -128,11 +131,11 @@ Listings per site: {site_counts}
 Provide a short professional summary comparing market prices to RRP.
     """
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-5",
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # lightweight, fast model (or gpt-4-turbo / gpt-5)
             messages=[{"role": "user", "content": prompt}],
         )
-        return response["choices"][0]["message"]["content"]
+        return response.choices[0].message.content
     except Exception as e:
         st.error(f"GPT Error: {e}")
         return None
