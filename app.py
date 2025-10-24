@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import numpy as np
 import time
 import random
+import plotly.express as px
 from openai import OpenAI
 
 # ----------------------------
@@ -86,7 +87,6 @@ def scrape_ceneo(ean):
             continue
     return results
 
-
 def scrape_allegro(ean):
     url = f"https://allegro.pl/listing?string={ean}"
     soup = BeautifulSoup(get_html(url), "html.parser")
@@ -148,14 +148,12 @@ def aggregate_prices(ean):
             st.warning(f"{site} error: {e}")
             results[site] = []
     all_prices = []
-for site, site_data in results.items():
-    if site == "Ceneo" and site_data and isinstance(site_data[0], dict):
-        all_prices.extend([item["price"] for item in site_data])
-    else:
-        all_prices.extend(site_data)
-
-return all_prices, {site: len(p) for site, p in results.items()}, results
-
+    for site, site_data in results.items():
+        if site == "Ceneo" and site_data and isinstance(site_data[0], dict):
+            all_prices.extend([item["price"] for item in site_data])
+        else:
+            all_prices.extend(site_data)
+    return all_prices, {site: len(p) for site, p in results.items()}, results
 
 # ----------------------------
 # GPT SUMMARY
@@ -211,44 +209,47 @@ if st.button("Check Market Prices", key="search_btn"):
         st.metric("Median Market Price", f"{median_converted:.2f} {symbol}")
         st.metric("Deviation vs RRP", f"{deviation:.1f}%")
         st.write("🛍️ Listings found per site:", site_counts)
-        import plotly.express as px
 
-# --- If Ceneo has seller data, plot it ---
-if "Ceneo" in site_data and site_data["Ceneo"] and isinstance(site_data["Ceneo"][0], dict):
-    df = [{"Seller": item["seller"], "Price": item["price"] * rate} for item in site_data["Ceneo"]]
-    fig = px.bar(
-        df,
-        x="Seller",
-        y="Price",
-        text="Price",
-        title=f"Ceneo Seller Prices ({symbol})",
-        labels={"Price": f"Price ({symbol})", "Seller": "Seller"},
-    )
-    fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
-    fig.update_yaxes(title_text=f"Price in {symbol}")
-    fig.update_xaxes(tickangle=45)
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.bar_chart([p * rate for p in all_prices])
+        # ---------- Chart Section ----------
+        if "Ceneo" in site_data and site_data["Ceneo"] and isinstance(site_data["Ceneo"][0], dict):
+            df = [{"Seller": item["seller"], "Price": item["price"] * rate} for item in site_data["Ceneo"]]
+            fig = px.bar(
+                df,
+                x="Seller",
+                y="Price",
+                text="Price",
+                title=f"Ceneo Seller Prices ({symbol})",
+                labels={"Price": f"Price ({symbol})", "Seller": "Seller"},
+            )
+            fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+            fig.update_yaxes(title_text=f"Price in {symbol}")
+            fig.update_xaxes(tickangle=45)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.bar_chart([p * rate for p in all_prices])
 
-
-        # Per-site summary table
+        # ---------- Table Section ----------
         st.markdown("### 📊 Per-Site Price Summary")
         table_data = []
         for site, prices in site_data.items():
             if prices:
+                if isinstance(prices[0], dict):  # handle Ceneo dicts
+                    site_prices = [p["price"] for p in prices]
+                else:
+                    site_prices = prices
                 table_data.append({
                     "Site": site,
-                    "Count": len(prices),
-                    "Min": f"{min(prices) * rate:.2f} {symbol}",
-                    "Median": f"{np.median(prices) * rate:.2f} {symbol}",
-                    "Max": f"{max(prices) * rate:.2f} {symbol}"
+                    "Count": len(site_prices),
+                    "Min": f"{min(site_prices) * rate:.2f} {symbol}",
+                    "Median": f"{np.median(site_prices) * rate:.2f} {symbol}",
+                    "Max": f"{max(site_prices) * rate:.2f} {symbol}"
                 })
         if table_data:
             st.dataframe(table_data, use_container_width=True)
         else:
             st.write("No per-site data to show.")
 
+        # ---------- GPT Summary ----------
         with st.spinner("Generating GPT summary..."):
             summary = gpt_summary(barcode, median_converted, deviation, site_counts, symbol)
         if summary:
