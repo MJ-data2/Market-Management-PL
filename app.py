@@ -11,7 +11,7 @@ from openai import OpenAI
 # STREAMLIT CONFIG
 # ----------------------------
 st.set_page_config(page_title="Universal Price Intelligence", layout="centered")
-st.title("🌍 Universal Multi-Market Price Intelligence Dashboard")
+st.title(" Universal Multi-Market Price Intelligence Dashboard")
 st.caption("Compare Ceneo, Allegro, Amazon, and Google Shopping prices by barcode (EAN), convert to EUR, and summarize with GPT.")
 
 # ----------------------------
@@ -47,17 +47,22 @@ def get_exchange_rate_pln_to_eur():
 def safe_float(text):
     """Convert PLN string price to float safely."""
     text = text.replace("zł", "").replace(",", ".").replace(" ", "")
-    return float(text)
+    try:
+        return float(text)
+    except:
+        return None
 
 def get_html(url, retries=3):
-    """Get rendered HTML using ScraperAPI with retries and longer timeout."""
+    """Get rendered HTML using ScraperAPI with retries, scroll and longer wait."""
     for attempt in range(retries):
         try:
             proxy_url = (
                 f"https://api.scraperapi.com?"
-                f"api_key={SCRAPER_API_KEY}&render=true&country_code=pl&render_wait=6&url={url}"
+                f"api_key={SCRAPER_API_KEY}"
+                f"&render=true&render_scroll=true"
+                f"&country_code=pl&render_wait=8&url={url}"
             )
-            res = requests.get(proxy_url, headers=HEADERS, timeout=60)
+            res = requests.get(proxy_url, headers=HEADERS, timeout=90)
             res.raise_for_status()
             return res.text
         except Exception as e:
@@ -81,51 +86,69 @@ def scrape_ceneo(ean):
             seller_el = card.select_one(".shop-name, .product-offer-link")
             if price_el:
                 price = safe_float(price_el.get_text(strip=True))
-                seller = seller_el.get_text(strip=True) if seller_el else "Unknown seller"
-                results.append({"seller": seller, "price": price})
+                if price is not None:
+                    seller = seller_el.get_text(strip=True) if seller_el else "Unknown seller"
+                    results.append({"seller": seller, "price": price})
         except Exception:
             continue
     return results
 
+
 def scrape_allegro(ean):
     url = f"https://allegro.pl/listing?string={ean}"
-    soup = BeautifulSoup(get_html(url), "html.parser")
-    prices = []
-    for el in soup.select("span._9c44d_1zemI span, span[data-testid='price-section']"):
-        txt = el.get_text(strip=True)
-        if "zł" in txt:
-            try:
-                prices.append(safe_float(txt))
-            except:
-                continue
-    return prices
+    html = get_html(url)
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+    for card in soup.select("article[data-role='offer']"):
+        try:
+            price_el = card.select_one("span._9c44d_3AMmE")
+            seller_el = card.select_one("div._9c44d_3N42J span")
+            if price_el:
+                price = safe_float(price_el.get_text(strip=True))
+                if price is not None:
+                    seller = seller_el.get_text(strip=True) if seller_el else "Unknown seller"
+                    results.append({"seller": seller, "price": price})
+        except Exception:
+            continue
+    return results
+
 
 def scrape_amazon(ean):
     url = f"https://www.amazon.pl/s?k={ean}"
-    soup = BeautifulSoup(get_html(url), "html.parser")
-    prices = []
-    for el in soup.select("span.a-price-whole, span.a-price span.a-offscreen"):
-        txt = el.get_text(strip=True)
-        if "zł" in txt:
-            try:
-                prices.append(safe_float(txt))
-            except:
-                continue
-    return prices
-
-def scrape_google_shopping(ean):
-    url = f"https://www.google.com/search?tbm=shop&q={ean}"
     html = get_html(url)
     soup = BeautifulSoup(html, "html.parser")
-    prices = []
-    for el in soup.select("span.a8Pemb, span.T14wmb, div.t0fcAb"):
-        txt = el.get_text(strip=True)
-        if "zł" in txt:
-            try:
-                prices.append(safe_float(txt))
-            except:
-                continue
-    return prices
+    results = []
+    for card in soup.select("div.s-result-item[data-component-type='s-search-result']"):
+        try:
+            price_el = card.select_one("span.a-price span.a-offscreen")
+            seller_el = card.select_one("h5.s-line-clamp-1, span.a-size-small.a-color-secondary")
+            if price_el:
+                price = safe_float(price_el.get_text(strip=True))
+                if price is not None:
+                    seller = seller_el.get_text(strip=True) if seller_el else "Unknown seller"
+                    results.append({"seller": seller, "price": price})
+        except Exception:
+            continue
+    return results
+
+
+def scrape_google_shopping(ean):
+    url = f"https://www.google.com/search?tbm=shop&hl=pl&gl=pl&q={ean}"
+    html = get_html(url)
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+    for card in soup.select("div.sh-dgr__grid-result, div.sh-pr__product-results"):
+        try:
+            price_el = card.select_one("span.a8Pemb, span.T14wmb")
+            seller_el = card.select_one("div.aULzUe, div.E5ocAb")
+            if price_el:
+                price = safe_float(price_el.get_text(strip=True))
+                if price is not None:
+                    seller = seller_el.get_text(strip=True) if seller_el else "Unknown seller"
+                    results.append({"seller": seller, "price": price})
+        except Exception:
+            continue
+    return results
 
 # ----------------------------
 # AGGREGATOR
@@ -141,18 +164,19 @@ def aggregate_prices(ean):
     }.items():
         try:
             st.write(f"🔍 Searching **{site}** ...")
-            prices = fn(ean)
-            results[site] = prices
+            data = fn(ean)
+            results[site] = data
             time.sleep(random.uniform(1, 2))
         except Exception as e:
             st.warning(f"{site} error: {e}")
             results[site] = []
     all_prices = []
     for site, site_data in results.items():
-        if site == "Ceneo" and site_data and isinstance(site_data[0], dict):
-            all_prices.extend([item["price"] for item in site_data])
-        else:
-            all_prices.extend(site_data)
+        if site_data:
+            if isinstance(site_data[0], dict):
+                all_prices.extend([item["price"] for item in site_data])
+            else:
+                all_prices.extend(site_data)
     return all_prices, {site: len(p) for site, p in results.items()}, results
 
 # ----------------------------
@@ -211,29 +235,28 @@ if st.button("Check Market Prices", key="search_btn"):
         st.write("🛍️ Listings found per site:", site_counts)
 
         # ---------- Chart Section ----------
-        if "Ceneo" in site_data and site_data["Ceneo"] and isinstance(site_data["Ceneo"][0], dict):
-            df = [{"Seller": item["seller"], "Price": item["price"] * rate} for item in site_data["Ceneo"]]
-            fig = px.bar(
-                df,
-                x="Seller",
-                y="Price",
-                text="Price",
-                title=f"Ceneo Seller Prices ({symbol})",
-                labels={"Price": f"Price ({symbol})", "Seller": "Seller"},
-            )
-            fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
-            fig.update_yaxes(title_text=f"Price in {symbol}")
-            fig.update_xaxes(tickangle=45)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.bar_chart([p * rate for p in all_prices])
+        for site, data in site_data.items():
+            if data and isinstance(data[0], dict):
+                df = [{"Seller": item["seller"], "Price": item["price"] * rate} for item in data]
+                fig = px.bar(
+                    df,
+                    x="Seller",
+                    y="Price",
+                    text="Price",
+                    title=f"{site} Seller Prices ({symbol})",
+                    labels={"Price": f"Price ({symbol})", "Seller": "Seller"},
+                )
+                fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+                fig.update_yaxes(title_text=f"Price in {symbol}")
+                fig.update_xaxes(tickangle=45)
+                st.plotly_chart(fig, use_container_width=True)
 
         # ---------- Table Section ----------
         st.markdown("### 📊 Per-Site Price Summary")
         table_data = []
         for site, prices in site_data.items():
             if prices:
-                if isinstance(prices[0], dict):  # handle Ceneo dicts
+                if isinstance(prices[0], dict):
                     site_prices = [p["price"] for p in prices]
                 else:
                     site_prices = prices
@@ -257,6 +280,7 @@ if st.button("Check Market Prices", key="search_btn"):
             st.write(summary)
     else:
         st.warning("No prices found for this barcode.")
+
 
 
 
