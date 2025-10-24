@@ -261,7 +261,7 @@ and what this means versus RRP.
 # ----------------------------
 # STREAMLIT INTERFACE
 # ----------------------------
-product_url = st.text_input("🔗 Enter your product page URL:")
+product_url = st.text_input("🔗 Enter your product page URL:", key="product_url_input")
 if st.button("Check Market Prices"):
     if not product_url:
         st.warning("Please enter a valid product URL.")
