@@ -147,8 +147,15 @@ def aggregate_prices(ean):
         except Exception as e:
             st.warning(f"{site} error: {e}")
             results[site] = []
-    all_prices = [p for site_prices in results.values() for p in site_prices]
-    return all_prices, {site: len(p) for site, p in results.items()}, results
+    all_prices = []
+for site, site_data in results.items():
+    if site == "Ceneo" and site_data and isinstance(site_data[0], dict):
+        all_prices.extend([item["price"] for item in site_data])
+    else:
+        all_prices.extend(site_data)
+
+return all_prices, {site: len(p) for site, p in results.items()}, results
+
 
 # ----------------------------
 # GPT SUMMARY
