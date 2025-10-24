@@ -211,7 +211,26 @@ if st.button("Check Market Prices", key="search_btn"):
         st.metric("Median Market Price", f"{median_converted:.2f} {symbol}")
         st.metric("Deviation vs RRP", f"{deviation:.1f}%")
         st.write("🛍️ Listings found per site:", site_counts)
-        st.bar_chart([p * rate for p in all_prices])
+        import plotly.express as px
+
+# --- If Ceneo has seller data, plot it ---
+if "Ceneo" in site_data and site_data["Ceneo"] and isinstance(site_data["Ceneo"][0], dict):
+    df = [{"Seller": item["seller"], "Price": item["price"] * rate} for item in site_data["Ceneo"]]
+    fig = px.bar(
+        df,
+        x="Seller",
+        y="Price",
+        text="Price",
+        title=f"Ceneo Seller Prices ({symbol})",
+        labels={"Price": f"Price ({symbol})", "Seller": "Seller"},
+    )
+    fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+    fig.update_yaxes(title_text=f"Price in {symbol}")
+    fig.update_xaxes(tickangle=45)
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.bar_chart([p * rate for p in all_prices])
+
 
         # Per-site summary table
         st.markdown("### 📊 Per-Site Price Summary")
