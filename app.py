@@ -26,7 +26,9 @@ def safe_float(text):
     text = text.replace("zł", "").replace(",", ".").replace(" ", "")
     return float(text)
 
-# --- Marketplace scrapers ---
+# ----------------------------
+# MARKETPLACE SCRAPERS
+# ----------------------------
 def scrape_ceneo(ean):
     url = f"https://www.ceneo.pl/;szukaj-{ean}"
     html = requests.get(url, headers=HEADERS, timeout=10).text
@@ -79,6 +81,7 @@ def scrape_google_shopping(ean):
 # AGGREGATOR
 # ----------------------------
 def aggregate_prices(ean):
+    """Collect prices from all supported sites."""
     results = {}
     for site, fn in {
         "Ceneo": scrape_ceneo,
@@ -111,7 +114,7 @@ Summarize this pricing situation briefly in a professional business tone.
     """
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-5",
+            model="gpt-5",  # or "gpt-4-turbo"
             messages=[{"role": "user", "content": prompt}],
         )
         return response["choices"][0]["message"]["content"]
@@ -150,7 +153,4 @@ if st.button("Check Market Prices", key="search_btn"):
     else:
         st.warning("No prices found for this barcode.")
 
-            st.write(summary)
-    else:
-        st.warning("No prices found on any site.")
 
