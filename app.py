@@ -34,16 +34,21 @@ def safe_float(text):
     text = text.replace("zł", "").replace(",", ".").replace(" ", "")
     return float(text)
 
-def get_html(url):
-    """Get HTML using ScraperAPI fallback for JS-heavy pages."""
-    try:
-        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&render=true&url={url}"
-        res = requests.get(proxy_url, headers=HEADERS, timeout=60)
-        res.raise_for_status()
-        return res.text
-    except Exception as e:
-        st.warning(f"ScraperAPI failed for {url[:50]}... ({e})")
-        return ""
+def get_html(url, retries=3):
+    """Get rendered HTML using ScraperAPI with retries and longer timeout."""
+    for attempt in range(retries):
+        try:
+            proxy_url = (
+                f"https://api.scraperapi.com?"
+                f"api_key={SCRAPER_API_KEY}&render=true&country_code=pl&render_wait=6&url={url}"
+            )
+            res = requests.get(proxy_url, headers=HEADERS, timeout=60)
+            res.raise_for_status()
+            return res.text
+        except Exception as e:
+            st.warning(f"ScraperAPI attempt {attempt+1} failed for {url[:60]}... ({e})")
+            time.sleep(3)
+    return ""
 
 # ----------------------------
 # MARKETPLACE SCRAPERS (via ScraperAPI)
