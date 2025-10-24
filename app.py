@@ -2,22 +2,23 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import numpy as np
-import openai
 import time
 import random
+from openai import OpenAI
 
 # ----------------------------
 # STREAMLIT CONFIG
 # ----------------------------
 st.set_page_config(page_title="Universal Price Intelligence", layout="centered")
 st.title("🌍 Universal Multi-Market Price Intelligence Dashboard")
-st.caption("Searches Ceneo, Allegro, Amazon, and Google Shopping by barcode (EAN) using ScraperAPI fallback.")
+st.caption("Compare Ceneo, Allegro, Amazon, and Google Shopping prices by barcode (EAN), convert to EUR, and summarize with GPT.")
 
 # ----------------------------
 # API KEYS
 # ----------------------------
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 SCRAPER_API_KEY = st.secrets["SCRAPER_API_KEY"]
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:119.0) Gecko/20100101 Firefox/119.0",
@@ -28,9 +29,22 @@ HEADERS = {
 }
 
 # ----------------------------
+# CURRENCY CONVERSION
+# ----------------------------
+def get_exchange_rate_pln_to_eur():
+    """Fetch live PLN→EUR rate with fallback."""
+    try:
+        res = requests.get("https://api.exchangerate.host/latest?base=PLN&symbols=EUR", timeout=10)
+        data = res.json()
+        return float(data["rates"]["EUR"])
+    except Exception:
+        return 0.23  # fallback rate if API fails
+
+# ----------------------------
 # SCRAPER HELPERS
 # ----------------------------
 def safe_float(text):
+    """Convert PLN string price to float safely."""
     text = text.replace("zł", "").replace(",", ".").replace(" ", "")
     return float(text)
 
@@ -51,9 +65,8 @@ def get_html(url, retries=3):
     return ""
 
 # ----------------------------
-# MARKETPLACE SCRAPERS (via ScraperAPI)
+# MARKETPLACE SCRAPERS
 # ----------------------------
-# --- CENEO ---
 def scrape_ceneo(ean):
     url = f"https://www.ceneo.pl/;szukaj-{ean}"
     soup = BeautifulSoup(get_html(url), "html.parser")
@@ -65,13 +78,10 @@ def scrape_ceneo(ean):
             continue
     return prices
 
-
-# --- ALLEGRO ---
 def scrape_allegro(ean):
     url = f"https://allegro.pl/listing?string={ean}"
     soup = BeautifulSoup(get_html(url), "html.parser")
     prices = []
-    # Allegro uses many nested spans; catch all numeric prices
     for el in soup.select("span._9c44d_1zemI span, span[data-testid='price-section']"):
         txt = el.get_text(strip=True)
         if "zł" in txt:
@@ -81,8 +91,6 @@ def scrape_allegro(ean):
                 continue
     return prices
 
-
-# --- AMAZON ---
 def scrape_amazon(ean):
     url = f"https://www.amazon.pl/s?k={ean}"
     soup = BeautifulSoup(get_html(url), "html.parser")
@@ -96,14 +104,11 @@ def scrape_amazon(ean):
                 continue
     return prices
 
-
-# --- GOOGLE SHOPPING ---
 def scrape_google_shopping(ean):
     url = f"https://www.google.com/search?tbm=shop&q={ean}"
     html = get_html(url)
     soup = BeautifulSoup(html, "html.parser")
     prices = []
-    # Main price spans
     for el in soup.select("span.a8Pemb, span.T14wmb, div.t0fcAb"):
         txt = el.get_text(strip=True)
         if "zł" in txt:
@@ -112,7 +117,6 @@ def scrape_google_shopping(ean):
             except:
                 continue
     return prices
-
 
 # ----------------------------
 # AGGREGATOR
@@ -135,18 +139,15 @@ def aggregate_prices(ean):
             st.warning(f"{site} error: {e}")
             results[site] = []
     all_prices = [p for site_prices in results.values() for p in site_prices]
-    return all_prices, {site: len(p) for site, p in results.items()}
+    return all_prices, {site: len(p) for site, p in results.items()}, results
 
 # ----------------------------
 # GPT SUMMARY
 # ----------------------------
-from openai import OpenAI
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-def gpt_summary(ean, median, deviation, site_counts):
+def gpt_summary(ean, median, deviation, site_counts, currency_symbol):
     prompt = f"""
 Product EAN: {ean}
-Median Market Price: {median:.2f} zł
+Median Market Price: {median:.2f} {currency_symbol}
 Deviation vs RRP: {deviation:.1f}%
 Listings per site: {site_counts}
 
@@ -154,7 +155,7 @@ Provide a short professional summary comparing market prices to RRP.
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # lightweight, fast model (or gpt-4-turbo / gpt-5)
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
         )
         return response.choices[0].message.content
@@ -167,6 +168,7 @@ Provide a short professional summary comparing market prices to RRP.
 # ----------------------------
 barcode = st.text_input("🔢 Enter product barcode (EAN):", key="barcode_input")
 rrp = st.number_input("💰 Enter your recommended retail price (RRP) in zł:", min_value=0.0, step=0.01)
+currency = st.radio("🌍 Display prices in:", ["PLN", "EUR"], horizontal=True)
 
 if st.button("Check Market Prices", key="search_btn"):
     if not barcode:
@@ -174,24 +176,52 @@ if st.button("Check Market Prices", key="search_btn"):
         st.stop()
 
     with st.spinner("Scraping marketplaces..."):
-        all_prices, site_counts = aggregate_prices(barcode)
+        all_prices, site_counts, site_data = aggregate_prices(barcode)
 
     if all_prices:
         median = np.median(all_prices)
         deviation = (median - rrp) / rrp * 100 if rrp else 0
 
-        st.metric("Median Market Price", f"{median:.2f} zł")
+        # Currency conversion
+        rate = 1.0
+        symbol = "zł"
+        if currency == "EUR":
+            rate = get_exchange_rate_pln_to_eur()
+            symbol = "€"
+
+        median_converted = median * rate
+        rrp_converted = rrp * rate if rrp else 0
+
+        st.metric("Median Market Price", f"{median_converted:.2f} {symbol}")
         st.metric("Deviation vs RRP", f"{deviation:.1f}%")
         st.write("🛍️ Listings found per site:", site_counts)
-        st.bar_chart(all_prices)
+        st.bar_chart([p * rate for p in all_prices])
+
+        # Per-site summary table
+        st.markdown("### 📊 Per-Site Price Summary")
+        table_data = []
+        for site, prices in site_data.items():
+            if prices:
+                table_data.append({
+                    "Site": site,
+                    "Count": len(prices),
+                    "Min": f"{min(prices) * rate:.2f} {symbol}",
+                    "Median": f"{np.median(prices) * rate:.2f} {symbol}",
+                    "Max": f"{max(prices) * rate:.2f} {symbol}"
+                })
+        if table_data:
+            st.dataframe(table_data, use_container_width=True)
+        else:
+            st.write("No per-site data to show.")
 
         with st.spinner("Generating GPT summary..."):
-            summary = gpt_summary(barcode, median, deviation, site_counts)
+            summary = gpt_summary(barcode, median_converted, deviation, site_counts, symbol)
         if summary:
             st.markdown("### 🧠 GPT Summary")
             st.write(summary)
     else:
         st.warning("No prices found for this barcode.")
+
 
 
 
